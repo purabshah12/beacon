@@ -6,10 +6,11 @@ import tensorflow as tf
 tf.get_logger().setLevel("ERROR")
 import json
 import glob
-from datetime import datetime
-from typing import List, Optional
+from transformers import CLIPProcessor, CLIPModel
 from PIL import Image
 import math
+from datetime import datetime
+from typing import List, Optional
 
 app = Flask(__name__)
 CORS(app)
@@ -23,70 +24,71 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'heic'}
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 print(f"Upload directory: {os.path.abspath(UPLOAD_FOLDER)}")
 
+model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def extract_metadata_from_filename(filename):
+def parse_filename_metadata(filename):
     """
-    Extract metadata embedded in filename
+    Parse metadata from filename
     Format: originalname__foundLat_foundLon__pickupLocation.ext
     Returns: (found_lat, found_lon, pickup_location)
     """
     try:
-        segments = filename.split('__')
-        if len(segments) >= 3:
-            # Parse location coordinates
-            coord_segment = segments[1]
-            if coord_segment != "NoGPS":
-                coordinate_parts = coord_segment.split('_')
-                if len(coordinate_parts) >= 2:
-                    latitude = float(coordinate_parts[0])
-                    longitude = float(coordinate_parts[1])
+        parts = filename.split('__')
+        if len(parts) >= 3:
+            # Extract location coordinates
+            location_part = parts[1]
+            if location_part != "NoGPS":
+                coords = location_part.split('_')
+                if len(coords) >= 2:
+                    found_lat = float(coords[0])
+                    found_lon = float(coords[1])
                 else:
-                    latitude, longitude = None, None
+                    found_lat, found_lon = None, None
             else:
-                latitude, longitude = None, None
+                found_lat, found_lon = None, None
 
-            # Parse pickup location (strip file extension)
-            location_name = segments[2].rsplit('.', 1)[0].replace('_', ' ')
+            # Extract pickup location (remove file extension)
+            pickup_location = parts[2].rsplit('.', 1)[0].replace('_', ' ')
 
-            return latitude, longitude, location_name
+            return found_lat, found_lon, pickup_location
         else:
-            # Fallback for older format
+            # Old format fallback
             if '__' in filename:
-                location_name = filename.split('__')[1].rsplit('.', 1)[0].replace('_', ' ')
-                return None, None, location_name
+                pickup_location = filename.split('__')[1].rsplit('.', 1)[0].replace('_', ' ')
+                return None, None, pickup_location
             return None, None, 'Unknown'
-    except Exception as err:
-        print(f"Error extracting metadata from {filename}: {err}")
+    except Exception as e:
+        print(f"Error parsing filename {filename}: {e}")
         return None, None, 'Unknown'
 
-def compute_haversine_distance(lat1, lon1, lat2, lon2):
+def calculate_distance(lat1, lon1, lat2, lon2):
     """
-    Compute distance between two GPS coordinates in kilometers using Haversine formula
+    Calculate distance between two GPS coordinates in kilometers using Haversine formula
     """
     if lat1 is None or lon1 is None or lat2 is None or lon2 is None:
         return float('inf')
 
-    # Radius of Earth in kilometers
-    EARTH_RADIUS_KM = 6371.0
+    # Earth's radius in kilometers
+    R = 6371.0
 
-    # Convert degrees to radians
-    lat1_radians = math.radians(lat1)
-    lon1_radians = math.radians(lon1)
-    lat2_radians = math.radians(lat2)
-    lon2_radians = math.radians(lon2)
-
-    # Calculate differences
-    delta_lat = lat2_radians - lat1_radians
-    delta_lon = lon2_radians - lon1_radians
+    # Convert to radians
+    lat1_rad = math.radians(lat1)
+    lon1_rad = math.radians(lon1)
+    lat2_rad = math.radians(lat2)
+    lon2_rad = math.radians(lon2)
 
     # Haversine formula
-    a_value = math.sin(delta_lat / 2)**2 + math.cos(lat1_radians) * math.cos(lat2_radians) * math.sin(delta_lon / 2)**2
-    c_value = 2 * math.atan2(math.sqrt(a_value), math.sqrt(1 - a_value))
-    distance_km = EARTH_RADIUS_KM * c_value
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+    a = math.sin(dlat / 2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    distance = R * c
 
-    return distance_km
+    return distance
 
 def load_items() -> List[dict]:
     if not os.path.exists(DATA_FILE):
@@ -109,151 +111,179 @@ def get_next_id() -> int:
 def read_root():
     return jsonify({"message": "Beacon Lost and Found API"})
 
-@app.route("/upload", methods=["POST"])
+@app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
-        print("Missing file in request")
+        print("No file part in request")
         return jsonify({'success': False, 'error': 'No file part'}), 400
 
-    uploaded_file = request.files['file']
-    if uploaded_file.filename == '':
-        print("Empty filename received")
+    file = request.files['file']
+    if file.filename == '':
+        print("No selected file")
         return jsonify({'success': False, 'error': 'No selected file'}), 400
 
-    # Extract found location (EXIF or GPS data) - for matching purposes
-    found_lat = request.form.get('foundLatitude')
-    found_lon = request.form.get('foundLongitude')
+    # Get found location (from EXIF or live GPS) - used for matching
+    found_latitude = request.form.get('foundLatitude')
+    found_longitude = request.form.get('foundLongitude')
 
-    # Extract pickup location (where to retrieve item) - for display purposes
-    retrieval_location = request.form.get('pickupLocation', 'Unknown')
+    # Get pickup location (where item can be retrieved) - used for display
+    pickup_location = request.form.get('pickupLocation', 'Unknown')
 
-    print(f"Processing upload: {uploaded_file.filename}")
-    print(f"Found coords (matching): Lat={found_lat}, Lon={found_lon}")
-    print(f"Retrieval location (display): {retrieval_location}")
+    print(f"Received file: {file.filename}")
+    print(f"Found Location (for matching): Lat={found_latitude}, Lon={found_longitude}")
+    print(f"Pickup Location (for display): {pickup_location}")
 
-    # Build filename with embedded metadata
+    # Create filename with embedded metadata
     # Format: originalname__foundLat_foundLon__pickupLocation.ext
-    name_parts = uploaded_file.filename.rsplit('.', 1)
-    original_name = name_parts[0]
-    file_extension = name_parts[1] if len(name_parts) > 1 else 'jpg'
+    filename_parts = file.filename.rsplit('.', 1)
+    base_name = filename_parts[0]
+    extension = filename_parts[1] if len(filename_parts) > 1 else 'jpg'
 
-    # Construct location segment
-    coord_segment = f"{found_lat}_{found_lon}" if found_lat and found_lon else "NoGPS"
-    location_segment = retrieval_location.replace(' ', '_')
+    # Build filename with location data
+    location_part = f"{found_latitude}_{found_longitude}" if found_latitude and found_longitude else "NoGPS"
+    pickup_part = pickup_location.replace(' ', '_')
 
-    new_filename = f"{original_name}__{coord_segment}__{location_segment}.{file_extension}"
-    destination_path = os.path.join(UPLOAD_FOLDER, new_filename)
+    filename = f"{base_name}__{location_part}__{pickup_part}.{extension}"
+    file_path = os.path.join(UPLOAD_FOLDER, filename)
 
     try:
-        uploaded_file.save(destination_path)
-        if os.path.exists(destination_path):
-            print(f"Upload successful: {destination_path}")
+        file.save(file_path)
+        if os.path.exists(file_path):
+            print(f"File saved successfully: {file_path}")
         else:
-            print(f"Upload verification failed: {destination_path}")
+            print(f"File save failed: {file_path}")
             return jsonify({'success': False, 'error': 'File not saved to disk'}), 500
-    except Exception as save_error:
-        print(f"Upload error: {save_error}")
-        return jsonify({'success': False, 'error': f"Failed to save file: {save_error}"}), 500
+    except Exception as e:
+        print(f"Error saving file: {e}")
+        return jsonify({'success': False, 'error': f"Failed to save file: {e}"}), 500
 
-    image_url = f"{NGROK_BASE_URL}/uploads/{new_filename}"
-    print(f"File accessible at: {image_url}")
+    file_url = f"{NGROK_BASE_URL}/uploads/{filename}"
+    print(f"Uploaded file URL: {file_url}")
     return jsonify({
         'success': True,
-        'filename': new_filename,
-        'url': image_url,
-        'foundLocation': f"{found_lat},{found_lon}" if found_lat and found_lon else None,
-        'pickupLocation': retrieval_location
+        'filename': filename,
+        'url': file_url,
+        'foundLocation': f"{found_latitude},{found_longitude}" if found_latitude and found_longitude else None,
+        'pickupLocation': pickup_location
     }), 200
 
 @app.route('/match', methods=['POST'])
 @cross_origin()
 def find_match():
-    payload = request.get_json()
-    search_description = payload.get('description', '')
-    lost_place_name = payload.get('lostLocation', 'Unknown')
-    lost_lat = payload.get('lostLatitude')
-    lost_lon = payload.get('lostLongitude')
+    data = request.get_json()
+    user_prompt = data.get('description', '')
+    lost_location_text = data.get('lostLocation', 'Unknown')  # Text location (building name)
+    lost_latitude = data.get('lostLatitude')  # GPS coordinates if provided
+    lost_longitude = data.get('lostLongitude')
 
-    if not search_description:
+    if not user_prompt:
         return jsonify({'error': 'No description provided'}), 400
 
-    print(f"Searching for item: '{search_description}'")
-    print(f"Lost at location: {lost_place_name}")
-    print(f"Lost coordinates: {lost_lat}, {lost_lon}")
+    print(f"Searching for: '{user_prompt}'")
+    print(f"Lost location text: {lost_location_text}")
+    print(f"Lost GPS coords: {lost_latitude}, {lost_longitude}")
 
-    # Collect all image files
-    image_files = glob.glob(f"{UPLOAD_FOLDER}/*.jpg") + \
-                  glob.glob(f"{UPLOAD_FOLDER}/*.jpeg") + \
-                  glob.glob(f"{UPLOAD_FOLDER}/*.png")
-
-    if not image_files:
+    image_paths = glob.glob(f"{UPLOAD_FOLDER}/*.jpg") + \
+                   glob.glob(f"{UPLOAD_FOLDER}/*.jpeg") + \
+                   glob.glob(f"{UPLOAD_FOLDER}/*.png")
+    if not image_paths:
         return jsonify({'error': 'No images found'}), 404
 
-    # Build candidate list
-    match_candidates = []
+    images = []
+    valid_paths = []
+    metadata_list = []
 
-    for img_path in image_files:
+    for path in image_paths:
         try:
-            # Extract metadata from filename
-            img_filename = os.path.basename(img_path)
-            found_latitude, found_longitude, pickup_spot = extract_metadata_from_filename(img_filename)
+            img = Image.open(path).convert("RGB")
+            images.append(img)
+            valid_paths.append(path)
 
-            # Compute distance if coordinates available
-            proximity = float('inf')
-            if lost_lat and lost_lon and found_latitude and found_longitude:
-                proximity = compute_haversine_distance(
-                    float(lost_lat), float(lost_lon),
-                    found_latitude, found_longitude
-                )
-
-            # Simple text matching score (placeholder for CLIP)
-            description_score = 0.5  # Default neutral score
-            if search_description.lower() in img_filename.lower():
-                description_score = 0.9  # Higher score for filename match
-
-            match_candidates.append({
-                'path': img_path,
-                'filename': img_filename,
-                'description_score': description_score,
-                'proximity': proximity,
-                'found_latitude': found_latitude,
-                'found_longitude': found_longitude,
-                'pickup_spot': pickup_spot
+            # Parse filename metadata
+            filename = os.path.basename(path)
+            found_lat, found_lon, pickup_loc = parse_filename_metadata(filename)
+            metadata_list.append({
+                'found_lat': found_lat,
+                'found_lon': found_lon,
+                'pickup_location': pickup_loc
             })
+        except Exception as e:
+            print(f"Skipping {path}: {e}")
 
-            print(f"Candidate: {img_filename} - Score: {description_score:.4f}, Distance: {proximity:.2f}km")
-
-        except Exception as err:
-            print(f"Skipping file {img_path}: {err}")
-
-    if not match_candidates:
+    if not images:
         return jsonify({'error': 'No valid images loaded'}), 500
 
-    # Sort by proximity first if coordinates available, otherwise by description score
-    if lost_lat and lost_lon:
-        match_candidates.sort(key=lambda x: (x['proximity'], -x['description_score']))
-        print("Sorted by proximity (distance)")
+    # Step 1: Get description-based confidence scores using CLIP
+    text_prompts = [user_prompt]
+    inputs = processor(text=text_prompts, images=images, return_tensors="pt", padding=True)
+    outputs = model(**inputs)
+    logits = outputs.logits_per_image
+    probs = logits.softmax(dim=0)
+
+    # Create a list of candidates with scores and metadata
+    candidates = []
+    for i in range(len(probs)):
+        confidence = probs[i, 0].item()
+        path = valid_paths[i]
+        metadata = metadata_list[i]
+
+        # Calculate distance if both locations are available
+        distance = float('inf')
+        if lost_latitude and lost_longitude and metadata['found_lat'] and metadata['found_lon']:
+            distance = calculate_distance(
+                float(lost_latitude), float(lost_longitude),
+                metadata['found_lat'], metadata['found_lon']
+            )
+
+        candidates.append({
+            'path': path,
+            'confidence': confidence,
+            'distance': distance,
+            'metadata': metadata
+        })
+
+        print(f"Candidate: {os.path.basename(path)} - Confidence: {confidence:.4f}, Distance: {distance:.2f}km")
+
+    # Step 2: Sort by confidence first (descending)
+    candidates.sort(key=lambda x: x['confidence'], reverse=True)
+
+    # Step 3: Check for ties (candidates within 10% of the best confidence)
+    best_confidence = candidates[0]['confidence']
+    tie_threshold = best_confidence * 0.9  # 10% threshold
+
+    tied_candidates = [c for c in candidates if c['confidence'] >= tie_threshold]
+
+    if len(tied_candidates) > 1 and lost_latitude and lost_longitude:
+        # Step 4: Use location as tiebreaker - sort tied candidates by distance
+        print(f"Found {len(tied_candidates)} candidates with similar confidence, using location as tiebreaker")
+        tied_candidates.sort(key=lambda x: x['distance'])
+        best_match = tied_candidates[0]
+        print(f"Best match after location tiebreaker: {os.path.basename(best_match['path'])} (distance: {best_match['distance']:.2f}km)")
     else:
-        match_candidates.sort(key=lambda x: -x['description_score'])
-        print("Sorted by description score")
+        # No ties or no location provided, use the highest confidence
+        best_match = candidates[0]
+        print(f"Best match by confidence: {os.path.basename(best_match['path'])}")
 
-    # Select best match
-    top_match = match_candidates[0]
-    top_filename = top_match['filename']
-    top_url = f"{NGROK_BASE_URL}/uploads/{top_filename}"
-    found_coords_str = f"{top_match['found_latitude']},{top_match['found_longitude']}" if top_match['found_latitude'] and top_match['found_longitude'] else None
+    # Prepare response
+    best_filename = os.path.basename(best_match['path'])
+    best_image_url = f"{NGROK_BASE_URL}/uploads/{best_filename}"
+    found_lat = best_match['metadata']['found_lat']
+    found_lon = best_match['metadata']['found_lon']
+    pickup_location = best_match['metadata']['pickup_location']
 
-    print(f"Best match result:")
-    print(f"  URL: {top_url}")
-    print(f"  Score: {top_match['description_score']:.4f}")
-    print(f"  Found coordinates: {found_coords_str}")
-    print(f"  Pickup location: {top_match['pickup_spot']}")
+    found_location_str = f"{found_lat},{found_lon}" if found_lat and found_lon else None
+
+    print(f"Returning best match:")
+    print(f"  URL: {best_image_url}")
+    print(f"  Confidence: {best_match['confidence']:.4f}")
+    print(f"  Found at: {found_location_str}")
+    print(f"  Pickup at: {pickup_location}")
 
     return jsonify({
-        'best_match': top_url,
-        'confidence': top_match['description_score'],
-        'foundLocation': found_coords_str,
-        'pickupLocation': top_match['pickup_spot']
+        'best_match': best_image_url,
+        'confidence': best_match['confidence'],
+        'foundLocation': found_location_str,
+        'pickupLocation': pickup_location
     }), 200
 
 @app.route("/items", methods=["POST"])
@@ -330,9 +360,9 @@ def delete_item(item_id):
 @app.route('/uploads/<path:filename>')
 @cross_origin()
 def serve_uploaded_file(filename):
-    target_path = os.path.join(UPLOAD_FOLDER, filename)
-    if os.path.exists(target_path):
-        print(f"Serving file: {filename}")
+    file_path = os.path.join(UPLOAD_FOLDER, filename)
+    if os.path.exists(file_path):
+        print(f"File found, serving: {filename}")
         return send_from_directory(UPLOAD_FOLDER, filename)
     else:
         print(f"File not found: {filename}")
