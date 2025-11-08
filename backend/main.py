@@ -15,7 +15,7 @@ from typing import List, Optional
 app = Flask(__name__)
 CORS(app)
 
-NGROK_BASE_URL = ''
+NGROK_BASE_URL = 'https://subtransparently-unnoting-malaysia.ngrok-free.dev'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 DATA_FILE = os.path.join(BASE_DIR, "items.json")
