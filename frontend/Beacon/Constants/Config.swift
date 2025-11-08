@@ -9,7 +9,7 @@ import Foundation
 
 struct Config {
     static let baseURL = "https://subtransparently-unnoting-malaysia.ngrok-free.dev"
-    static let uploadEndpoint = "\(baseURL)/upload"
+    static let uploadEndpoint = "\(baseURL)/uploads"
     static let matchEndpoint = "\(baseURL)/match"
 
     static let umdBuildings = [

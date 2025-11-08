@@ -82,6 +82,7 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     return distance
 
 @app.route('/upload', methods=['POST'])
+@app.route('/uploads', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
         print("No file part in request")
@@ -93,11 +94,12 @@ def upload_file():
         return jsonify({'success': False, 'error': 'No selected file'}), 400
 
     # Get found location (from EXIF or live GPS) - used for matching
-    found_latitude = request.form.get('foundLatitude')
-    found_longitude = request.form.get('foundLongitude')
+    # Accept both parameter names for compatibility
+    found_latitude = request.form.get('foundLatitude') or request.form.get('latitude')
+    found_longitude = request.form.get('foundLongitude') or request.form.get('longitude')
 
     # Get pickup location (where item can be retrieved) - used for display
-    pickup_location = request.form.get('pickupLocation', 'Unknown')
+    pickup_location = request.form.get('pickupLocation') or request.form.get('lostLocation') or 'Unknown'
 
     print(f"Received file: {file.filename}")
     print(f"Found Location (for matching): Lat={found_latitude}, Lon={found_longitude}")
@@ -243,18 +245,23 @@ def find_match():
 
     found_location_str = f"{found_lat},{found_lon}" if found_lat and found_lon else None
 
+    # Convert confidence to standard Python float for JSON serialization
+    confidence_value = float(best_match['confidence'])
+    
     print(f"Returning best match:")
     print(f"  URL: {best_image_url}")
-    print(f"  Confidence: {best_match['confidence']:.4f}")
+    print(f"  Confidence: {confidence_value:.4f}")
     print(f"  Found at: {found_location_str}")
     print(f"  Pickup at: {pickup_location}")
 
-    return jsonify({
+    response_data = {
         'best_match': best_image_url,
-        'confidence': best_match['confidence'],
-        'foundLocation': found_location_str,
-        'pickupLocation': pickup_location
-    }), 200
+        'confidence': confidence_value,
+        'lostLocation': pickup_location
+    }
+    
+    print(f"Response JSON: {response_data}")
+    return jsonify(response_data), 200
 
 @app.route('/uploads/<path:filename>')
 @cross_origin()

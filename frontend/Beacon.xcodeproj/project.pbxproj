@@ -289,9 +289,12 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 76WX8VYA2Q;
+				DEVELOPMENT_TEAM = 9RFRW3QQCZ;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Beacon/Info.plist;
+				INFOPLIST_KEY_NSCameraUsageDescription = "This app needs camera access to photograph found items for the lost and found system.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app needs location access to record where items were found on campus.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app needs photo library access to select images of found items.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
@@ -302,7 +305,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = Eswar.Beacon;
+				PRODUCT_BUNDLE_IDENTIFIER = Purab.Beacon;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -321,9 +324,12 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 76WX8VYA2Q;
+				DEVELOPMENT_TEAM = 9RFRW3QQCZ;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Beacon/Info.plist;
+				INFOPLIST_KEY_NSCameraUsageDescription = "This app needs camera access to photograph found items for the lost and found system.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app needs location access to record where items were found on campus.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app needs photo library access to select images of found items.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
@@ -334,7 +340,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = Eswar.Beacon;
+				PRODUCT_BUNDLE_IDENTIFIER = Purab.Beacon;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
